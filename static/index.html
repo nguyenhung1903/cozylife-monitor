@@ -1,0 +1,608 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Smart plug</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --paper: #ffffff;
+    --ink: #111111;
+    --muted: #6b6b6b;
+    --hair: #ebebeb;
+    --accent: #e8590c;
+    --offline: #c92a2a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #0e0e0f;
+      --ink: #f3f3f3;
+      --muted: #9a9aa0;
+      --hair: #252527;
+      --accent: #ff8a4c;
+      --offline: #ff6b6b;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: ui-sans-serif, "SF Pro Display", "Inter", "Segoe UI", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 880px;
+    margin: 0 auto;
+    padding: clamp(24px, 6vw, 64px) clamp(20px, 5vw, 40px) 40px;
+  }
+
+  /* Top line */
+  header { display: flex; justify-content: space-between; align-items: center; font-size: 0.875rem; color: var(--muted); }
+  .status { display: inline-flex; align-items: center; gap: 8px; color: var(--ink); }
+  .status::before {
+    content: "";
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--muted);
+  }
+  .status[data-state="on"]::before { background: var(--accent); }
+  .status[data-state="offline"] { color: var(--offline); }
+  .status[data-state="offline"]::before { background: var(--offline); }
+
+  /* Big number */
+  .now {
+    margin: clamp(32px, 8vw, 72px) 0 0;
+    font-size: clamp(5rem, 20vw, 10rem);
+    font-weight: 200;
+    line-height: 0.95;
+    letter-spacing: -0.04em;
+    font-variant-numeric: tabular-nums;
+  }
+  .now small { margin-left: 0.08em; font-size: 0.22em; font-weight: 300; letter-spacing: 0; color: var(--muted); }
+
+  /* Three figures */
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin: 40px 0 0; max-width: 560px; }
+  .stats dt { font-size: 0.6875rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+  .stats dd { margin: 6px 0 0; font-size: 1.375rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .stats dd small { font-size: 0.7em; color: var(--muted); }
+
+  /* Range selector */
+  .tabs {
+    display: flex;
+    gap: 22px;
+    margin-top: clamp(36px, 7vw, 56px);
+    border-bottom: 1px solid var(--hair);
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tabs button {
+    font: inherit;
+    font-size: 0.875rem;
+    padding: 0 0 12px;
+    margin-bottom: -1px;
+    border: 0;
+    border-bottom: 1.5px solid transparent;
+    background: none;
+    color: var(--muted);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .tabs button:hover { color: var(--ink); }
+  .tabs button[aria-pressed="true"] { color: var(--ink); border-bottom-color: var(--ink); }
+  .tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 2px; }
+
+  /* Chart */
+  .chart { position: relative; height: clamp(260px, 42vh, 400px); margin-top: 28px; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .tip {
+    position: absolute;
+    top: 0;
+    padding: 8px 10px;
+    border-radius: 6px;
+    background: var(--ink);
+    color: var(--paper);
+    font-size: 0.75rem;
+    line-height: 1.5;
+    white-space: nowrap;
+    pointer-events: none;
+    font-variant-numeric: tabular-nums;
+  }
+  .tip[hidden] { display: none; }
+  .tip strong { font-size: 1rem; font-weight: 500; }
+
+  footer { margin-top: 20px; font-size: 0.75rem; line-height: 1.5; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <span id="status" class="status" data-state="off" role="status">Unknown</span>
+    <span>Smart plug</span>
+  </header>
+
+  <p class="now" aria-label="Current power"><span id="now">–</span><small>W</small></p>
+
+  <dl class="stats">
+    <div><dt id="l1">Min</dt><dd id="v1">–</dd></div>
+    <div><dt id="l2">Average</dt><dd id="v2">–</dd></div>
+    <div><dt id="l3">Max</dt><dd id="v3">–</dd></div>
+  </dl>
+
+  <nav class="tabs" aria-label="Chart range">
+    <button type="button" data-mode="live" aria-pressed="true">Live</button>
+    <button type="button" data-mode="hour" aria-pressed="false">Hour</button>
+    <button type="button" data-mode="day" aria-pressed="false">Day</button>
+    <button type="button" data-mode="week" aria-pressed="false">Week</button>
+    <button type="button" data-mode="month" aria-pressed="false">Month</button>
+    <button type="button" data-mode="year" aria-pressed="false">Year</button>
+  </nav>
+
+  <section class="chart">
+    <canvas id="chart" role="img" aria-label="Power chart"></canvas>
+    <div id="tip" class="tip" hidden></div>
+  </section>
+
+  <footer id="footer">Waiting for the first reading.</footer>
+</main>
+
+<script>
+  const POLL_MS = 2000;               // Live refresh interval
+  const LIVE_WINDOW_MS = 120000;      // Live chart shows the last 2 minutes
+  const HISTORY_REFRESH_MS = 30000;   // History reloads this often
+
+  // "line" plots average watts, "bar" plots kWh per bucket
+  const KIND = { live: "line", hour: "line", day: "line", week: "line", month: "bar", year: "bar" };
+  const LABEL = { live: "live", hour: "the last hour", day: "the last 24 hours", week: "the last 7 days", month: "the last 30 days", year: "the last 12 months" };
+
+  const $ = (id) => document.getElementById(id);
+  const canvas = $("chart");
+  const tip = $("tip");
+
+  let mode = "live";
+  let history = null;          // Last /api/history response for the current mode
+  let historyState = "idle";   // "loading" | "ready" | "error"
+  let historyError = "";
+  let liveFooter = "Waiting for the first reading.";
+  let hoverPoint = null;       // Point under the pointer
+  let geo = null;              // Geometry from the last draw, used for hit testing
+  const samples = [];          // Live samples: { t: epoch ms, w: watts or null }
+
+  const fmt = (v) => (Number.isInteger(v) ? String(v) : v.toFixed(1));
+  const fmtKwh = (v) => (v < 1 ? v.toFixed(3) : v < 100 ? v.toFixed(2) : v.toFixed(1));
+  const fmtAxis = (v) => String(parseFloat(v.toFixed(2)));
+  const hm = (d) => d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+  // Round up to 1, 2, 5 or 10 times a power of ten, never below `floor`
+  function niceMax(v, floor) {
+    const m = Math.max(v, floor);
+    const p = Math.pow(10, Math.floor(Math.log10(m)));
+    const n = m / p;
+    return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * p;
+  }
+
+  // "#rrggbb" -> "rgba(r, g, b, a)"
+  function rgba(hex, a) {
+    const n = parseInt(hex.slice(1), 16);
+    return `rgba(${n >> 16}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+  }
+
+  // What the chart shows now. Every point has v (the plotted value, may be null) and t (x position, ms).
+  function currentView() {
+    const kind = KIND[mode];
+    if (mode === "live") {
+      const end = Date.now();
+      return { kind, start: end - LIVE_WINDOW_MS, end, points: samples.map((s) => ({ t: s.t, v: s.w, avg: s.w })) };
+    }
+    if (!history || !history.points.length) return { kind, start: 0, end: 1, points: [] };
+    const pts = history.points;
+    return {
+      kind,
+      start: pts[0].from * 1000,
+      end: pts[pts.length - 1].to * 1000,
+      points: pts.map((p) => ({
+        t: ((p.from + p.to) / 2) * 1000,  // Plot at the middle of the bucket
+        from: p.from * 1000,
+        to: p.to * 1000,
+        v: kind === "bar" ? p.kwh : p.avg,
+        avg: p.avg,
+        max: p.max,
+        kwh: p.kwh,
+      })),
+    };
+  }
+
+  // Time-axis labels aligned to round local times
+  function makeTicks(view) {
+    const { start, end, points } = view;
+    const out = [];
+    if (mode === "live") {
+      const mins = LIVE_WINDOW_MS / 60000;
+      return [
+        { t: start, label: `-${mins} min` },
+        { t: start + LIVE_WINDOW_MS / 2, label: `-${mins / 2} min` },
+        { t: end, label: "now" },
+      ];
+    }
+    if (!points.length) return out;
+    if (mode === "month") {
+      points.forEach((p, i) => {
+        if ((points.length - 1 - i) % 5 === 0) {
+          out.push({ t: p.t, label: new Date(p.from).toLocaleDateString([], { day: "numeric", month: "short" }) });
+        }
+      });
+      return out;
+    }
+    if (mode === "year") {
+      return points.map((p) => ({ t: p.t, label: new Date(p.from).toLocaleDateString([], { month: "short" }) }));
+    }
+    const d = new Date(start);
+    if (mode === "hour") {
+      d.setSeconds(0, 0);
+      d.setMinutes(Math.ceil(d.getMinutes() / 15) * 15);
+      while (d.getTime() < start) d.setMinutes(d.getMinutes() + 15);
+      for (; d.getTime() <= end; d.setMinutes(d.getMinutes() + 15)) out.push({ t: d.getTime(), label: hm(d) });
+    } else if (mode === "day") {
+      d.setMinutes(0, 0, 0);
+      while (d.getTime() < start || d.getHours() % 6) d.setHours(d.getHours() + 1);
+      for (; d.getTime() <= end; d.setHours(d.getHours() + 6)) out.push({ t: d.getTime(), label: hm(d) });
+    } else {  // week
+      d.setHours(0, 0, 0, 0);
+      while (d.getTime() < start) d.setDate(d.getDate() + 1);
+      for (; d.getTime() <= end; d.setDate(d.getDate() + 1)) {
+        out.push({ t: d.getTime(), label: d.toLocaleDateString([], { weekday: "short" }) });
+      }
+    }
+    return out;
+  }
+
+  // Split text into lines no wider than maxW
+  function wrapText(ctx, text, maxW) {
+    const lines = [];
+    let line = "";
+    for (const word of text.split(" ")) {
+      const test = line ? `${line} ${word}` : word;
+      if (line && ctx.measureText(test).width > maxW) {
+        lines.push(line);
+        line = word;
+      } else {
+        line = test;
+      }
+    }
+    if (line) lines.push(line);
+    return lines;
+  }
+
+  function emptyMessage() {
+    if (mode === "live") return "Waiting for readings from the plug.";
+    if (historyState === "error") return `Could not load history (${historyError}).`;
+    if (historyState !== "ready") return "Loading.";
+    return `Nothing recorded for ${LABEL[mode]} yet. The server saves a reading every ${history.save_interval_s} seconds, so this fills in over time.`;
+  }
+
+  function draw() {
+    const rect = canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.round(rect.width * dpr);
+    canvas.height = Math.round(rect.height * dpr);
+    const ctx = canvas.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    const css = getComputedStyle(document.documentElement);
+    const color = (name) => css.getPropertyValue(name).trim();
+    const accent = color("--accent");
+
+    const view = currentView();
+    const { kind, start, end, points } = view;
+    const W = rect.width, H = rect.height;
+    const L = 44, R = 4, T = 22, B = 28;
+    const pw = W - L - R, ph = H - T - B;
+
+    const values = points.filter((p) => p.v !== null).map((p) => p.v);
+    const yMax = niceMax(values.length ? Math.max(...values) : 0, kind === "bar" ? 0.1 : 10);
+    const X = (t) => L + ((t - start) / (end - start)) * pw;
+    const Y = (v) => T + ph - (v / yMax) * ph;
+    geo = { X, Y, view, pw };
+
+    // Horizontal hairlines, y labels, unit
+    ctx.font = "12px ui-sans-serif, system-ui, sans-serif";
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = color("--hair");
+    ctx.fillStyle = color("--muted");
+    ctx.textAlign = "right";
+    ctx.textBaseline = "middle";
+    for (let i = 0; i <= 4; i++) {
+      const v = (yMax * i) / 4;
+      const y = Math.round(Y(v)) + 0.5;
+      ctx.beginPath();
+      ctx.moveTo(L, y);
+      ctx.lineTo(W - R, y);
+      ctx.stroke();
+      ctx.fillText(fmtAxis(v), L - 10, y);
+    }
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
+    ctx.fillText(kind === "bar" ? "kWh" : "W", 0, 0);
+
+    // Time axis; labels that would collide are skipped
+    ctx.textBaseline = "top";
+    ctx.textAlign = "center";
+    let lastRight = -Infinity;
+    for (const tk of makeTicks(view)) {
+      const x = X(tk.t);
+      if (kind === "line" && mode !== "live") {
+        ctx.strokeStyle = color("--hair");
+        ctx.beginPath();
+        ctx.moveTo(Math.round(x) + 0.5, T);
+        ctx.lineTo(Math.round(x) + 0.5, T + ph);
+        ctx.stroke();
+      }
+      const half = ctx.measureText(tk.label).width / 2;
+      const lx = Math.min(Math.max(x, L + half), W - R - half);  // Keep the label inside the chart
+      if (lx - half < lastRight + 12) continue;
+      ctx.fillStyle = color("--muted");
+      ctx.fillText(tk.label, lx, H - B + 10);
+      lastRight = lx + half;
+    }
+
+    // Empty state
+    if (!values.length) {
+      ctx.fillStyle = color("--muted");
+      ctx.font = "14px ui-sans-serif, system-ui, sans-serif";
+      ctx.textBaseline = "middle";
+      const msg = emptyMessage();
+      const lines = wrapText(ctx, msg, Math.min(pw - 32, 400));
+      lines.forEach((ln, i) => ctx.fillText(ln, L + pw / 2, T + ph / 2 + (i - (lines.length - 1) / 2) * 22));
+      canvas.setAttribute("aria-label", msg);
+      return;
+    }
+
+    if (kind === "bar") {
+      const dim = hoverPoint !== null;
+      for (const p of points) {
+        if (p.v === null) continue;
+        const slot = X(p.to) - X(p.from);
+        const bw = Math.min(slot * 0.7, 36);
+        const x = X(p.t) - bw / 2;
+        const y = Y(p.v);
+        ctx.fillStyle = rgba(accent, dim && p !== hoverPoint ? 0.3 : 1);
+        ctx.fillRect(x, y, bw, T + ph - y);
+      }
+    } else {
+      // Split into runs so that gaps are not joined by a line
+      const runs = [];
+      let run = [];
+      for (const p of points) {
+        if (p.v === null) {
+          if (run.length) runs.push(run);
+          run = [];
+        } else {
+          run.push(p);
+        }
+      }
+      if (run.length) runs.push(run);
+
+      ctx.lineJoin = "round";
+      for (const r of runs) {
+        if (r.length === 1) {
+          ctx.fillStyle = accent;
+          ctx.beginPath();
+          ctx.arc(X(r[0].t), Y(r[0].v), 2.5, 0, Math.PI * 2);
+          ctx.fill();
+          continue;
+        }
+        ctx.beginPath();
+        r.forEach((p, i) => (i ? ctx.lineTo(X(p.t), Y(p.v)) : ctx.moveTo(X(p.t), Y(p.v))));
+        ctx.strokeStyle = accent;
+        ctx.lineWidth = 1.75;
+        ctx.stroke();
+
+        // Faint fade under the line
+        ctx.lineTo(X(r[r.length - 1].t), Y(0));
+        ctx.lineTo(X(r[0].t), Y(0));
+        ctx.closePath();
+        const g = ctx.createLinearGradient(0, T, 0, T + ph);
+        g.addColorStop(0, rgba(accent, 0.16));
+        g.addColorStop(1, rgba(accent, 0));
+        ctx.fillStyle = g;
+        ctx.fill();
+      }
+
+      // Marker for the point under the pointer
+      if (hoverPoint && hoverPoint.v !== null) {
+        const x = X(hoverPoint.t);
+        ctx.strokeStyle = color("--muted");
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(Math.round(x) + 0.5, T);
+        ctx.lineTo(Math.round(x) + 0.5, T + ph);
+        ctx.stroke();
+        ctx.fillStyle = color("--paper");
+        ctx.strokeStyle = accent;
+        ctx.lineWidth = 1.75;
+        ctx.beginPath();
+        ctx.arc(x, Y(hoverPoint.v), 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      }
+    }
+
+    canvas.setAttribute(
+      "aria-label",
+      mode === "live"
+        ? `Power in watts over the last ${LIVE_WINDOW_MS / 60000} minutes, currently ${fmt(values[values.length - 1])} W`
+        : `${kind === "bar" ? "Energy in kilowatt-hours" : "Power in watts"} for ${LABEL[mode]}`
+    );
+  }
+
+  // ---- Hover tooltip
+
+  function tipHtml(p) {
+    if (mode === "live") return `${new Date(p.t).toLocaleTimeString()}<br><strong>${fmt(p.v)} W</strong>`;
+    const a = new Date(p.from), b = new Date(p.to);
+    const dayLabel = a.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" });
+    if (KIND[mode] === "bar") {
+      const when = mode === "year" ? a.toLocaleDateString([], { month: "long", year: "numeric" }) : dayLabel;
+      return `${when}<br><strong>${fmtKwh(p.kwh)} kWh</strong><br>Avg ${fmt(p.avg)} W, peak ${fmt(p.max)} W`;
+    }
+    const when = mode === "week" ? `${dayLabel}, ${hm(a)}–${hm(b)}` : `${hm(a)}–${hm(b)}`;
+    return `${when}<br><strong>${fmt(p.avg)} W</strong><br>Peak ${fmt(p.max)} W`;
+  }
+
+  function showTip(clientX) {
+    if (!geo) return;
+    const rect = canvas.getBoundingClientRect();
+    const px = clientX - rect.left;
+    let best = null, bestDist = Infinity;
+    for (const p of geo.view.points) {
+      if (p.v === null) continue;
+      const dist = Math.abs(geo.X(p.t) - px);
+      if (dist < bestDist) { best = p; bestDist = dist; }
+    }
+    const reach = geo.view.kind === "bar" ? (geo.X(best ? best.to : 1) - geo.X(best ? best.from : 0)) / 2 : 40;
+    if (!best || bestDist > reach) return hideTip();
+    hoverPoint = best;
+
+    tip.innerHTML = tipHtml(best);
+    tip.hidden = false;
+    const x = geo.X(best.t);
+    const left = x + 14 + tip.offsetWidth > rect.width ? x - 14 - tip.offsetWidth : x + 14;
+    tip.style.left = `${Math.max(0, left)}px`;
+    draw();
+  }
+
+  function hideTip() {
+    if (hoverPoint) { hoverPoint = null; draw(); }
+    tip.hidden = true;
+  }
+
+  canvas.addEventListener("pointermove", (e) => showTip(e.clientX));
+  canvas.addEventListener("pointerleave", hideTip);
+
+  // ---- Status, figures and footer
+
+  function setStatus(state, label) {
+    const el = $("status");
+    el.dataset.state = state;
+    el.textContent = label;
+  }
+
+  function setStat(i, label, value, unit) {
+    $(`l${i}`).textContent = label;
+    $(`v${i}`).innerHTML = value === null ? "–" : `${value} <small>${unit}</small>`;
+  }
+
+  function updateStats() {
+    if (mode === "live") {
+      const values = samples.filter((s) => s.w !== null).map((s) => s.w);
+      const has = values.length > 0;
+      const avg = has ? values.reduce((a, b) => a + b, 0) / values.length : null;
+      setStat(1, "Min, 2 min", has ? fmt(Math.min(...values)) : null, "W");
+      setStat(2, "Average", has ? fmt(Math.round(avg * 10) / 10) : null, "W");
+      setStat(3, "Max, 2 min", has ? fmt(Math.max(...values)) : null, "W");
+    } else {
+      const s = history && history.stats.has_data ? history.stats : null;
+      setStat(1, "Energy", s ? fmtKwh(s.energy_kwh) : null, "kWh");
+      setStat(2, "Average", s ? fmt(s.avg) : null, "W");
+      setStat(3, "Peak", s ? fmt(s.peak) : null, "W");
+    }
+  }
+
+  function updateFooter() {
+    $("footer").textContent =
+      mode === "live"
+        ? liveFooter
+        : `Showing ${LABEL[mode]}. Energy is estimated from the saved power readings, so it can differ slightly from the plug's own counter.`;
+  }
+
+  // ---- History
+
+  async function loadHistory() {
+    if (mode === "live") return;
+    const requested = mode;
+    try {
+      const res = await fetch(`/api/history?range=${requested}`, { cache: "no-store" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (requested !== mode) return;  // The tab changed while loading
+      history = data;
+      historyState = "ready";
+    } catch (e) {
+      if (requested !== mode) return;
+      historyState = "error";
+      historyError = e.message;
+    }
+    updateStats();
+    draw();
+  }
+
+  function setMode(next) {
+    mode = next;
+    history = null;
+    hoverPoint = null;
+    tip.hidden = true;
+    historyState = next === "live" ? "idle" : "loading";
+    document.querySelectorAll(".tabs button").forEach((b) =>
+      b.setAttribute("aria-pressed", String(b.dataset.mode === next))
+    );
+    updateStats();
+    updateFooter();
+    draw();
+    loadHistory();
+  }
+
+  document.querySelectorAll(".tabs button").forEach((b) =>
+    b.addEventListener("click", () => setMode(b.dataset.mode))
+  );
+
+  // ---- Live polling (always running, so the big number and status stay current)
+
+  async function poll() {
+    const started = performance.now();
+    let watts = null;
+    try {
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), 4000);
+      const res = await fetch("/api/smart-plug", { cache: "no-store", signal: ctl.signal });
+      clearTimeout(timer);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const d = await res.json();
+
+      watts = d.power_w;
+      if (d.is_on === null) setStatus("off", "Unknown");
+      else if (d.is_on) setStatus("on", "On");
+      else setStatus("off", "Off");
+      liveFooter =
+        `Updated ${new Date().toLocaleTimeString()}. Refreshes every ${POLL_MS / 1000} seconds.` +
+        (watts === null ? " This plug did not report power." : "");
+    } catch (e) {
+      setStatus("offline", "Offline");
+      liveFooter = `Cannot reach the plug (${e.message}). Check its IP address and that it is powered. Retrying every ${POLL_MS / 1000} seconds.`;
+    }
+
+    const now = Date.now();
+    samples.push({ t: now, w: watts });
+    while (samples.length && samples[0].t < now - LIVE_WINDOW_MS) samples.shift();
+
+    $("now").textContent = watts !== null ? fmt(watts) : "–";
+    if (mode === "live") {
+      updateStats();
+      updateFooter();
+      draw();
+    }
+    setTimeout(poll, Math.max(0, POLL_MS - (performance.now() - started)));
+  }
+
+  window.addEventListener("resize", draw);
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", draw);
+  setInterval(loadHistory, HISTORY_REFRESH_MS);
+  updateStats();
+  draw();
+  poll();
+</script>
+</body>
+</html>

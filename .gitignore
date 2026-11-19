@@ -42,8 +42,6 @@ result-*
 *.pdf
 !docs/*.pdf
 
-# Generated HTML
-*.html
 
 # Logs
 *.log
