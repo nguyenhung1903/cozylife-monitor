@@ -11,6 +11,7 @@
       devShells.${system}.default = pkgs.mkShell {
         packages = with pkgs; [
           python312
+          python312Packages.pip
           python312Packages.fastapi
           python312Packages.uvicorn
           python312Packages.python-dotenv

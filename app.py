@@ -4,6 +4,7 @@ import sqlite3
 import threading
 import time
 from contextlib import asynccontextmanager, closing
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Literal
 
@@ -23,16 +24,29 @@ POWER_DIVISOR = float(os.getenv("PLUG_POWER_DIVISOR", "1"))
 
 LIVE_INTERVAL_S = float(os.getenv("PLUG_LIVE_INTERVAL", "2"))    # How often the plug is read
 SAVE_INTERVAL_S = int(os.getenv("PLUG_SAVE_INTERVAL", "10"))     # How often an average is stored
-RETENTION_DAYS = int(os.getenv("PLUG_RETENTION_DAYS", "30"))     # Older rows are deleted
+# Hourly summaries are small (about 8,800 rows per year) and are kept for 3 years.
+RETENTION_DAYS = int(os.getenv("PLUG_RETENTION_DAYS", str(3 * 365)))
+# Raw 10-second rows are only needed for the hour and day views, so they are kept briefly.
+RAW_RETENTION_DAYS = int(os.getenv("PLUG_RAW_RETENTION_DAYS", "3"))
 STALE_AFTER_S = 10                                               # Live reading older than this is "offline"
 DB_PATH = Path(os.getenv("PLUG_DB", Path(__file__).parent / "plug.db"))
 STATIC_DIR = Path(__file__).parent / "static"
 
-# range name -> (total span in seconds, bucket size in seconds)
+# Each range reads from one table and splits the period into buckets.
+#   "fixed"  buckets have a constant size in seconds.
+#   "day" / "month" buckets follow the local calendar (midnight to midnight, 1st to 1st).
 RANGES = {
-    "hour": (3600, 60),        # last hour, one point per minute
-    "day": (86400, 600),       # last 24 hours, one point per 10 minutes
-    "week": (7 * 86400, 3600), # last 7 days, one point per hour
+    "hour":  {"table": "samples", "unit": "fixed", "span": 3600,         "bucket": 60,   "kind": "line"},
+    "day":   {"table": "samples", "unit": "fixed", "span": 86400,        "bucket": 600,  "kind": "line"},
+    "week":  {"table": "hourly",  "unit": "fixed", "span": 7 * 86400,    "bucket": 3600, "kind": "line"},
+    "month": {"table": "hourly",  "unit": "day",   "count": 30, "fmt": "%Y-%m-%d",      "kind": "bar"},
+    "year":  {"table": "hourly",  "unit": "month", "count": 12, "fmt": "%Y-%m",         "kind": "bar"},
+}
+
+# Per table: (energy in watt-seconds, seconds covered, peak watts)
+_COLUMNS = {
+    "samples": ("power * dt", "dt", "power"),
+    "hourly": ("energy_ws", "seconds", "peak"),
 }
 
 plug = SmartPlug(PLUG_IP, port=PLUG_PORT)
@@ -59,20 +73,52 @@ def init_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS hourly (
+                ts         INTEGER PRIMARY KEY,  -- Unix time (s) of the start of the hour
+                energy_ws  REAL    NOT NULL,     -- Sum of watts x seconds in this hour
+                seconds    INTEGER NOT NULL,     -- Seconds of data in this hour
+                peak       REAL    NOT NULL      -- Highest stored power in this hour
+            )
+            """
+        )
+        # One-time migration: build hourly summaries from raw rows saved by an older version
+        if conn.execute("SELECT COUNT(*) FROM hourly").fetchone()[0] == 0:
+            conn.execute(
+                """
+                INSERT INTO hourly (ts, energy_ws, seconds, peak)
+                SELECT ts - ts % 3600, SUM(power * dt), SUM(dt), MAX(power)
+                FROM samples GROUP BY ts - ts % 3600
+                """
+            )
 
 
 def save_sample(ts: int, power: float, is_on, dt: int) -> None:
+    """Store one raw row and fold it into the matching hourly summary, in one transaction."""
     with closing(_connect()) as conn, conn:
-        conn.execute(
-            "INSERT OR REPLACE INTO samples (ts, power, is_on, dt) VALUES (?, ?, ?, ?)",
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO samples (ts, power, is_on, dt) VALUES (?, ?, ?, ?)",
             (ts, power, None if is_on is None else int(is_on), dt),
         )
+        if cur.rowcount:  # Skip the summary if the raw row was a duplicate
+            conn.execute(
+                """
+                INSERT INTO hourly (ts, energy_ws, seconds, peak) VALUES (?, ?, ?, ?)
+                ON CONFLICT(ts) DO UPDATE SET
+                    energy_ws = energy_ws + excluded.energy_ws,
+                    seconds   = seconds + excluded.seconds,
+                    peak      = MAX(peak, excluded.peak)
+                """,
+                (ts - ts % 3600, power * dt, dt, power),
+            )
 
 
 def purge_old() -> None:
-    cutoff = int(time.time()) - RETENTION_DAYS * 86400
+    now = int(time.time())
     with closing(_connect()) as conn, conn:
-        conn.execute("DELETE FROM samples WHERE ts < ?", (cutoff,))
+        conn.execute("DELETE FROM samples WHERE ts < ?", (now - RAW_RETENTION_DAYS * 86400,))
+        conn.execute("DELETE FROM hourly WHERE ts < ?", (now - RETENTION_DAYS * 86400,))
 
 
 # ----------------------------------------------------------------- sampler
@@ -131,7 +177,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(
     title="Smart Plug API",
     description="Local API for CozyLife Smart Plug monitoring",
-    version="2.0.0",
+    version="3.0.0",
     lifespan=lifespan,
 )
 
@@ -161,52 +207,85 @@ def get_plug():
     return latest
 
 
-@app.get("/api/history")
-def get_history(range_: Literal["hour", "day", "week"] = Query("hour", alias="range")):
-    """Bucketed power history for the last hour, 24 hours or 7 days."""
-    span, bucket = RANGES[range_]
-    now = int(time.time())
-    end = (now // bucket + 1) * bucket  # Next bucket boundary, so the current bucket is included
+def _fixed_buckets(span: int, bucket: int) -> list[tuple[int, int, int]]:
+    """Equal-size buckets ending at the next bucket boundary: (from_ts, to_ts, index)."""
+    end = (int(time.time()) // bucket + 1) * bucket  # Includes the current, partial bucket
     start = end - span
+    return [(start + i * bucket, start + (i + 1) * bucket, i) for i in range(span // bucket)]
 
+
+def _calendar_buckets(unit: str, count: int, fmt: str) -> list[tuple[int, int, str]]:
+    """Local-calendar buckets (days or months) ending with the current one: (from_ts, to_ts, key)."""
+    today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    if unit == "day":
+        firsts = [today - timedelta(days=i) for i in range(count - 1, -1, -1)]
+        following = lambda d: d + timedelta(days=1)
+    else:
+        firsts, y, m = [], today.year, today.month
+        for _ in range(count):
+            firsts.append(datetime(y, m, 1))
+            y, m = (y - 1, 12) if m == 1 else (y, m - 1)
+        firsts.reverse()
+        following = lambda d: datetime(d.year + (d.month == 12), d.month % 12 + 1, 1)
+    return [(int(d.timestamp()), int(following(d).timestamp()), d.strftime(fmt)) for d in firsts]
+
+
+@app.get("/api/history")
+def get_history(range_: Literal["hour", "day", "week", "month", "year"] = Query("hour", alias="range")):
+    """Bucketed power history: last hour, 24 hours, 7 days, 30 days or 12 months."""
+    cfg = RANGES[range_]
+    if cfg["unit"] == "fixed":
+        buckets = _fixed_buckets(cfg["span"], cfg["bucket"])
+        key_sql, key_params = "(ts - ?) / ?", (buckets[0][0], cfg["bucket"])
+    else:
+        buckets = _calendar_buckets(cfg["unit"], cfg["count"], cfg["fmt"])
+        # 'localtime' makes SQLite group by the server's local day or month
+        key_sql, key_params = "strftime(?, ts, 'unixepoch', 'localtime')", (cfg["fmt"],)
+    start, end = buckets[0][0], buckets[-1][1]
+
+    table = cfg["table"]
+    energy, seconds, peak = _COLUMNS[table]
+    # table and column names come from the constants above, never from the request
+    sql = f"""
+        SELECT {key_sql}, SUM({energy}), SUM({seconds}), MAX({peak})
+        FROM {table} WHERE ts >= ? AND ts < ? GROUP BY 1
+    """
     with closing(_connect()) as conn:
-        rows = conn.execute(
-            """
-            SELECT (ts - ?) / ? AS b, AVG(power), MAX(power)
-            FROM samples WHERE ts >= ? AND ts < ? GROUP BY b
-            """,
-            (start, bucket, start, end),
-        ).fetchall()
-        avg, peak, joules, count = conn.execute(
-            "SELECT AVG(power), MAX(power), SUM(power * dt), COUNT(*) FROM samples WHERE ts >= ? AND ts < ?",
-            (start, end),
-        ).fetchone()
+        rows = conn.execute(sql, (*key_params, start, end)).fetchall()
+    by_key = {k: (e, s, p) for k, e, s, p in rows}
 
-    by_index = {int(b): (a, m) for b, a, m in rows}
     points = []
-    for i in range(span // bucket):
-        a, m = by_index.get(i, (None, None))
+    total_ws = total_s = 0.0
+    top = None
+    for frm, to, key in buckets:
+        e, s, p = by_key.get(key, (None, None, None))
+        if s:
+            total_ws += e
+            total_s += s
+            top = p if top is None else max(top, p)
         points.append({
-            "t": start + i * bucket,  # Bucket start, Unix seconds
-            "avg": None if a is None else round(a, 2),
-            "max": None if m is None else round(m, 2),
+            "from": frm,  # Bucket start, Unix seconds
+            "to": to,     # Bucket end (exclusive)
+            "avg": round(e / s, 2) if s else None,
+            "max": round(p, 2) if s else None,
+            "kwh": round(e / 3_600_000, 4) if s else None,
         })
 
     return {
         "range": range_,
-        "start": start,
-        "bucket_s": bucket,
+        "kind": cfg["kind"],  # "line" plots average watts, "bar" plots kWh per bucket
         "save_interval_s": SAVE_INTERVAL_S,
         "points": points,
         "stats": {
-            "avg": None if avg is None else round(avg, 2),
-            "peak": None if peak is None else round(peak, 2),
+            "avg": round(total_ws / total_s, 2) if total_s else None,
+            "peak": round(top, 2) if top is not None else None,
             # Watt-seconds -> kWh (estimated by adding up the stored readings)
-            "energy_kwh": round((joules or 0) / 3_600_000, 4),
-            "samples": count,
+            "energy_kwh": round(total_ws / 3_600_000, 4),
+            "has_data": total_s > 0,
         },
     }
-    
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
