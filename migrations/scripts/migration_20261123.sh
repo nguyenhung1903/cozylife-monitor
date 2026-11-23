@@ -1,0 +1,4 @@
+#!/bin/bash
+python migrations/migration_20261123_add_create_update_time_columns_to_hourly.py
+python migrations/migration_20261123_add_create_update_time_columns_to_samples.py
+python migrations/migration_20261123_create_table_system_lifecycle.py

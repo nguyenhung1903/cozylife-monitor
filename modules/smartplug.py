@@ -66,15 +66,13 @@ class SmartPlug:
 
         return PlugReading(
             is_on=None if status is None else bool(status),
-            # Raw value; divide by 10 if the CozyLife app shows a value
-            # that is 10x smaller than this one.
             power_w=power,
             raw=data,
         )
 
 
 if __name__ == "__main__":
-    plug = SmartPlug("192.168.1.100")  # Replace with your plug's IP address
+    plug = SmartPlug("192.168.1.100")
     try:
         r = plug.read()
     except (OSError, ValueError) as e:

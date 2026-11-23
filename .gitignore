@@ -54,3 +54,8 @@ Thumbs.db
 tmp/
 temp/
 .cache/
+
+#db
+database
+database/*.db
+note.md
