@@ -115,6 +115,28 @@
   .tip[hidden] { display: none; }
   .tip strong { font-size: 1rem; font-weight: 500; }
 
+  /* System status */
+.events { margin-top: clamp(36px, 7vw, 56px); }
+.events h2 {
+  margin: 0 0 12px;
+  font-size: 0.6875rem;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.events ul { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--hair); }
+.events li {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--hair);
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.events li time { color: var(--ink); font-variant-numeric: tabular-nums; }
+.events li.empty { color: var(--muted); }
+.events li.error { color: var(--offline); }
+
   footer { margin-top: 20px; font-size: 0.75rem; line-height: 1.5; color: var(--muted); }
 </style>
 </head>
@@ -146,9 +168,64 @@
     <canvas id="chart" role="img" aria-label="Power chart"></canvas>
     <div id="tip" class="tip" hidden></div>
   </section>
-
   <footer id="footer">Waiting for the first reading.</footer>
+  
+  <section class="events" aria-labelledby="sysTitle">
+    <h2 id="sysTitle">System status</h2>
+    <ul id="sysList"><li class="empty">Loading.</li></ul>
+  </section>
 </main>
+
+<script>
+  const SYS_REFRESH_MS = 60000;
+
+  const fmtDateTime = (iso) =>
+    new Date(iso).toLocaleString([], {
+      day: "numeric", month: "short", year: "numeric",
+      hour: "2-digit", minute: "2-digit", second: "2-digit",
+    });
+
+  function timeEl(iso) {
+    const el = document.createElement("time");
+    el.dateTime = iso;
+    el.textContent = fmtDateTime(iso);
+    return el;
+  }
+
+  function renderSystemStatus(items) {
+    const ul = $("sysList");
+    ul.replaceChildren();
+    if (!items.length) {
+      const li = document.createElement("li");
+      li.className = "empty";
+      li.textContent = "No downtime recorded.";
+      ul.append(li);
+      return;
+    }
+    for (const it of items) {
+      const li = document.createElement("li");
+      li.append("The system went down at ", timeEl(it.shutdown_time));
+      if (it.startup_time) li.append(", and restarted at ", timeEl(it.startup_time));
+      li.append(".");
+      ul.append(li);
+    }
+  }
+
+  async function loadSystemStatus() {
+    try {
+      const res = await fetch("/api/system/status", { cache: "no-store" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      renderSystemStatus(await res.json());
+    } catch (e) {
+      const ul = $("sysList");
+      ul.replaceChildren();
+      const li = document.createElement("li");
+      li.className = "error";
+      li.textContent = `Could not load system status (${e.message}).`;
+      ul.append(li);
+    }
+  }
+</script>
 
 <script>
   const POLL_MS = 2000;               // Live refresh interval
@@ -560,7 +637,8 @@
   );
 
   // ---- Live polling (always running, so the big number and status stay current)
-
+  setInterval(loadSystemStatus, SYS_REFRESH_MS);
+  loadSystemStatus();
   async function poll() {
     const started = performance.now();
     let watts = null;

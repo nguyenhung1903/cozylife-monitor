@@ -9,6 +9,8 @@ from fastapi.responses import FileResponse
 from modules.smartplug import SmartPlug
 from services.electronic_sampler import ElectronicSamplerService
 from services.monitor_service import MonitorService
+from services.lifecycle_service import LifecycleService
+
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -23,7 +25,7 @@ plug = SmartPlug(PLUG_IP, port=PLUG_PORT)
 dbConn = DatabaseConnection(DB_PATH)
 elecSampler = ElectronicSamplerService(dbConn=dbConn, plug = plug, log=log)
 monitorService = MonitorService(dbConn = dbConn)
-
+lifecycleService = LifecycleService(dbConn=dbConn)
 
 # --------------------------------------------------------------------- API
 app = FastAPI(
@@ -59,9 +61,19 @@ def get_history(range_: Literal["hour", "day", "week", "month", "year"] = Query(
         return monitorService.get_history(range_=range_)
     except:
         raise HTTPException(status_code=503, detail="Monitor Service cannot get history")
+    
+@app.get("/api/system/status")
+def get_history(max_history = 10):
+    try:
+        return lifecycleService.get_history(max_history=max_history)
+    except:
+        raise HTTPException(status_code=503, detail="LifeCycle Service cannot get history")
+    
 
 if __name__ == "__main__":
     import uvicorn
+    lifecycleService.start()
+    
     uvicorn.run("app:app",
         host=os.getenv("APP_HOST"),
         port=int(os.getenv("APP_PORT")),
