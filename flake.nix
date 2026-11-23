@@ -12,6 +12,7 @@
         packages = with pkgs; [
           python312
           python312Packages.pip
+          python312Packages.discordpy
           python312Packages.fastapi
           python312Packages.uvicorn
           python312Packages.python-dotenv
