@@ -4,8 +4,9 @@ import time
 
 
 class LifecycleService:
-    def __init__(self, dbConn):
+    def __init__(self, dbConn, discordBot):
         self.dbConn = dbConn
+        self.discordBot = discordBot
         self._lock = threading.Lock()
         self._session_id = None
         
@@ -30,6 +31,8 @@ class LifecycleService:
                 )
                 VALUES (?, ?, ?, ?)
             """, (previous_time, startup_time, create_time, update_time))
+            
+            self.discordBot.notify_shutdown_event(shutdown_time=previous_time, startup_time=startup_time)
 
     def get_history(self, max_history = 10):
         now = time.time()

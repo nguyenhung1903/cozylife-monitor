@@ -10,7 +10,7 @@ from modules.smartplug import SmartPlug
 from services.electronic_sampler import ElectronicSamplerService
 from services.monitor_service import MonitorService
 from services.lifecycle_service import LifecycleService
-
+from services.discordbot_service import DiscordBotService
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -23,9 +23,10 @@ DB_PATH = os.getenv("PLUG_DB", "plug.db")
 STATIC_DIR = Path(__file__).parent / "static"
 plug = SmartPlug(PLUG_IP, port=PLUG_PORT)
 dbConn = DatabaseConnection(DB_PATH)
+discordBot = discordBot = DiscordBotService(token=os.getenv("DISCORD_BOT_TOKEN"),channel_id=int(os.getenv("DISCORD_BOT_CHANNEL_ID")),logger=log)
 elecSampler = ElectronicSamplerService(dbConn=dbConn, plug = plug, log=log)
 monitorService = MonitorService(dbConn = dbConn)
-lifecycleService = LifecycleService(dbConn=dbConn)
+lifecycleService = LifecycleService(dbConn=dbConn, discordBot=discordBot)
 
 # --------------------------------------------------------------------- API
 app = FastAPI(
