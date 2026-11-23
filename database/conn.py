@@ -2,6 +2,7 @@ import sqlite3
 from contextlib import asynccontextmanager, closing
 import time
 import os
+import datetime
 
 # Each range reads from one table and splits the period into buckets.
 #   "fixed"  buckets have a constant size in seconds.
@@ -47,23 +48,34 @@ class DatabaseConnection():
                 )
 
 
+    def _get_current_time(self):
+        tz_vn = datetime.timezone(datetime.timedelta(hours=7))
+        now = datetime.datetime.now(tz_vn)
+        create_time = now.isoformat(timespec="seconds")
+        update_time = now.isoformat(timespec="seconds")
+        
+        return create_time, update_time
+    
     def save_sample(self, ts: int, power: float, is_on, dt: int) -> None:
         """Store one raw row and fold it into the matching hourly summary, in one transaction."""
+        
+        create_time, update_time = self._get_current_time()
         with closing(self._connect()) as conn, conn:
             cur = conn.execute(
-                "INSERT OR IGNORE INTO samples (ts, power, is_on, dt) VALUES (?, ?, ?, ?)",
-                (ts, power, None if is_on is None else int(is_on), dt),
+                "INSERT OR IGNORE INTO samples (ts, power, is_on, dt, create_time, update_time) VALUES (?, ?, ?, ?, ?, ?)",
+                (ts, power, None if is_on is None else int(is_on), dt, create_time, update_time),
             )
             if cur.rowcount:  # Skip the summary if the raw row was a duplicate
+                create_time, update_time = self._get_current_time()
                 conn.execute(
                     """
-                    INSERT INTO hourly (ts, energy_ws, seconds, peak) VALUES (?, ?, ?, ?)
+                    INSERT INTO hourly (ts, energy_ws, seconds, peak, create_time, update_time) VALUES (?, ?, ?, ?, ?, ?)
                     ON CONFLICT(ts) DO UPDATE SET
                         energy_ws = energy_ws + excluded.energy_ws,
                         seconds   = seconds + excluded.seconds,
                         peak      = MAX(peak, excluded.peak)
                     """,
-                    (ts - ts % 3600, power * dt, dt, power),
+                    (ts - ts % 3600, power * dt, dt, power, create_time, update_time),
                 )
 
 
