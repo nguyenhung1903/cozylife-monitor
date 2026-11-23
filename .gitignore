@@ -56,6 +56,8 @@ temp/
 .cache/
 
 #db
-database
 database/*.db
+database/*.db-shm
+database/*.db-wal
 note.md
+!database/conn.py
