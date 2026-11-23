@@ -116,26 +116,53 @@
   .tip strong { font-size: 1rem; font-weight: 500; }
 
   /* System status */
-.events { margin-top: clamp(36px, 7vw, 56px); }
-.events h2 {
-  margin: 0 0 12px;
-  font-size: 0.6875rem;
-  font-weight: 400;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-.events ul { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--hair); }
-.events li {
-  padding: 12px 0;
-  border-bottom: 1px solid var(--hair);
-  font-size: 0.875rem;
-  line-height: 1.5;
-  color: var(--muted);
-}
-.events li time { color: var(--ink); font-variant-numeric: tabular-nums; }
-.events li.empty { color: var(--muted); }
-.events li.error { color: var(--offline); }
+  .events { margin-top: clamp(36px, 7vw, 56px); }
+  .events-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px; }
+  .events h2 {
+    margin: 0;
+    font-size: 0.6875rem;
+    font-weight: 400;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .events-count { font-size: 0.75rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .events ul { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--hair); }
+  .events li {
+    display: grid;
+    grid-template-columns: 84px 1fr auto;
+    gap: 16px;
+    align-items: baseline;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--hair);
+    font-size: 0.875rem;
+    line-height: 1.5;
+    color: var(--muted);
+  }
+  .ev-date { font-size: 0.75rem; letter-spacing: 0.04em; font-variant-numeric: tabular-nums; }
+  .ev-text time { color: var(--ink); font-variant-numeric: tabular-nums; }
+  .ev-text time.down { color: var(--offline); }
+  .ev-dur { color: var(--ink); font-size: 0.8125rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .events li.empty { display: block; }
+  .events li.error { display: block; color: var(--offline); }
+  .events .more {
+    margin-top: 12px;
+    padding: 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    font-size: 0.8125rem;
+    color: var(--muted);
+    cursor: pointer;
+  }
+  .events .more:hover { color: var(--ink); }
+  .events .more:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 2px; }
+  .events .more[hidden] { display: none; }
+
+  @media (max-width: 520px) {
+    .events li { grid-template-columns: 1fr auto; gap: 2px 12px; }
+    .ev-date { grid-column: 1 / -1; }
+  }
 
   footer { margin-top: 20px; font-size: 0.75rem; line-height: 1.5; color: var(--muted); }
 </style>
@@ -168,64 +195,18 @@
     <canvas id="chart" role="img" aria-label="Power chart"></canvas>
     <div id="tip" class="tip" hidden></div>
   </section>
-  <footer id="footer">Waiting for the first reading.</footer>
-  
+
   <section class="events" aria-labelledby="sysTitle">
-    <h2 id="sysTitle">System status</h2>
+    <div class="events-head">
+      <h2 id="sysTitle">System status</h2>
+      <span id="sysCount" class="events-count"></span>
+    </div>
     <ul id="sysList"><li class="empty">Loading.</li></ul>
+    <button type="button" id="sysMore" class="more" hidden></button>
   </section>
+
+  <footer id="footer">Waiting for the first reading.</footer>
 </main>
-
-<script>
-  const SYS_REFRESH_MS = 60000;
-
-  const fmtDateTime = (iso) =>
-    new Date(iso).toLocaleString([], {
-      day: "numeric", month: "short", year: "numeric",
-      hour: "2-digit", minute: "2-digit", second: "2-digit",
-    });
-
-  function timeEl(iso) {
-    const el = document.createElement("time");
-    el.dateTime = iso;
-    el.textContent = fmtDateTime(iso);
-    return el;
-  }
-
-  function renderSystemStatus(items) {
-    const ul = $("sysList");
-    ul.replaceChildren();
-    if (!items.length) {
-      const li = document.createElement("li");
-      li.className = "empty";
-      li.textContent = "No downtime recorded.";
-      ul.append(li);
-      return;
-    }
-    for (const it of items) {
-      const li = document.createElement("li");
-      li.append("The system went down at ", timeEl(it.shutdown_time));
-      if (it.startup_time) li.append(", and restarted at ", timeEl(it.startup_time));
-      li.append(".");
-      ul.append(li);
-    }
-  }
-
-  async function loadSystemStatus() {
-    try {
-      const res = await fetch("/api/system/status", { cache: "no-store" });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      renderSystemStatus(await res.json());
-    } catch (e) {
-      const ul = $("sysList");
-      ul.replaceChildren();
-      const li = document.createElement("li");
-      li.className = "error";
-      li.textContent = `Could not load system status (${e.message}).`;
-      ul.append(li);
-    }
-  }
-</script>
 
 <script>
   const POLL_MS = 2000;               // Live refresh interval
@@ -637,8 +618,7 @@
   );
 
   // ---- Live polling (always running, so the big number and status stay current)
-  setInterval(loadSystemStatus, SYS_REFRESH_MS);
-  loadSystemStatus();
+
   async function poll() {
     const started = performance.now();
     let watts = null;
@@ -675,12 +655,116 @@
     setTimeout(poll, Math.max(0, POLL_MS - (performance.now() - started)));
   }
 
+  // ---- System status
+
+  const SYS_REFRESH_MS = 60000;
+  const SYS_LIMIT = 3;
+  let sysItems = [];
+  let sysExpanded = false;
+
+  const sameDay = (a, b) => a.toDateString() === b.toDateString();
+  const fmtDay = (d) => d.toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" });
+  const fmtTime = (d) =>
+    d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+
+  function fmtDuration(ms) {
+    const s = Math.round(ms / 1000);
+    if (s < 1) return "< 1 s";
+    if (s < 60) return `${s} s`;
+    const m = Math.floor(s / 60);
+    if (m < 60) return `${m} min ${s % 60} s`;
+    const h = Math.floor(m / 60);
+    return `${h} h ${m % 60} min`;
+  }
+
+  // Time only; include the date when it differs from `ref`
+  function timeEl(iso, cls, ref) {
+    const d = new Date(iso);
+    const el = document.createElement("time");
+    el.dateTime = iso;
+    if (cls) el.className = cls;
+    el.textContent = ref && !sameDay(d, ref) ? `${fmtDay(d)}, ${fmtTime(d)}` : fmtTime(d);
+    return el;
+  }
+
+  function renderSystemStatus() {
+    const ul = $("sysList");
+    const more = $("sysMore");
+    ul.replaceChildren();
+    $("sysCount").textContent = sysItems.length ? `${sysItems.length} event${sysItems.length > 1 ? "s" : ""}` : "";
+
+    if (!sysItems.length) {
+      const li = document.createElement("li");
+      li.className = "empty";
+      li.textContent = "No downtime recorded.";
+      ul.append(li);
+      more.hidden = true;
+      return;
+    }
+
+    const rows = sysExpanded ? sysItems : sysItems.slice(0, SYS_LIMIT);
+    for (const it of rows) {
+      const down = new Date(it.shutdown_time);
+      const li = document.createElement("li");
+
+      const date = document.createElement("span");
+      date.className = "ev-date";
+      date.textContent = fmtDay(down);
+
+      const text = document.createElement("span");
+      text.className = "ev-text";
+      text.append("The system went down ", timeEl(it.shutdown_time, "down"));
+      if (it.startup_time) text.append(", and restarted at ", timeEl(it.startup_time, "", down));
+      text.append(".");
+
+      li.append(date, text);
+
+      if (it.startup_time) {
+        const ms = new Date(it.startup_time) - down;
+        if (ms >= 0) {
+          const dur = document.createElement("span");
+          dur.className = "ev-dur";
+          dur.textContent = fmtDuration(ms);
+          li.append(dur);
+        }
+      }
+      ul.append(li);
+    }
+
+    more.hidden = sysItems.length <= SYS_LIMIT;
+    more.textContent = sysExpanded ? "Show less" : `Show all ${sysItems.length}`;
+  }
+
+  async function loadSystemStatus() {
+    try {
+      const res = await fetch("/api/system/status", { cache: "no-store" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      sysItems = await res.json();
+      renderSystemStatus();
+    } catch (e) {
+      const ul = $("sysList");
+      ul.replaceChildren();
+      const li = document.createElement("li");
+      li.className = "error";
+      li.textContent = `Could not load system status (${e.message}).`;
+      ul.append(li);
+      $("sysMore").hidden = true;
+    }
+  }
+
+  $("sysMore").addEventListener("click", () => {
+    sysExpanded = !sysExpanded;
+    renderSystemStatus();
+  });
+
   window.addEventListener("resize", draw);
   window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", draw);
   setInterval(loadHistory, HISTORY_REFRESH_MS);
+  setInterval(loadSystemStatus, SYS_REFRESH_MS);
   updateStats();
   draw();
   poll();
+  loadSystemStatus();
 </script>
 </body>
 </html>
