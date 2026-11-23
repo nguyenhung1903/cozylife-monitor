@@ -5,14 +5,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 DB_PATH = os.getenv("PLUG_DB", "plug.db")
-
-import os
-import sqlite3
-from contextlib import asynccontextmanager, closing
-from dotenv import load_dotenv
-load_dotenv()
-
-DB_PATH = os.getenv("PLUG_DB", "plug.db")
 def migrate(db_path: str):
     with sqlite3.connect(db_path) as conn:
         conn.execute("""

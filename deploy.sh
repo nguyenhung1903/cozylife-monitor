@@ -16,6 +16,7 @@ docker run -d \
     --name "$CONTAINER" \
     -p 8000:8000 \
     --restart unless-stopped \
+    -v "$(pwd)/database:/app/database" \
     --env-file .env \
     "$IMAGE"
 
