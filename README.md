@@ -6,8 +6,6 @@ A lightweight monitoring platform built with Python and FastAPI to track electri
 
 The system collects real-time power readings, maintains historical consumption records, provides a web-based dashboard, and detects system shutdown and restart events with Discord notifications.
 
----
-
 ## Features
 
 ### 1. Smart Plug Monitoring
@@ -47,8 +45,6 @@ The system collects real-time power readings, maintains historical consumption r
 - System shutdown and restart history.
 - Responsive interface with light and dark theme support.
 
----
-
 ## Architecture
 
 ```text
@@ -87,8 +83,6 @@ The system collects real-time power readings, maintains historical consumption r
                    Discord Notifications
 ```
 
----
-
 ## Technology Stack
 
 | Component | Technology |
@@ -102,8 +96,6 @@ The system collects real-time power readings, maintains historical consumption r
 | Frontend | HTML, CSS, JavaScript |
 | Containerization | Docker |
 | Configuration | Python Dotenv |
-
----
 
 ## Project Structure
 
@@ -130,8 +122,6 @@ cozylife-monitor/
 └── README.md
 ```
 
----
-
 ## Requirements
 
 - Python 3.12+
@@ -139,8 +129,6 @@ cozylife-monitor/
 - Smart Plug and monitoring server connected to the same local network.
 - Discord Bot Token and a Discord channel ID (for notifications).
 - Docker (optional).
-
----
 
 ## Installation
 
@@ -208,8 +196,6 @@ The dashboard will be available at:
 http://localhost:8000/dashboard
 ```
 
----
-
 ## Docker Deployment
 
 Build and deploy the application using the provided deployment script:
@@ -246,8 +232,6 @@ To stop the container:
 docker stop cozylife-monitor
 ```
 
----
-
 ## API Endpoints
 
 | Method | Endpoint | Description |
@@ -278,8 +262,6 @@ GET /api/system/status?max_history=10
 
 Returns the latest system startup and shutdown records.
 
----
-
 ## Discord Notifications
 
 The system uses a Discord Bot to report system lifecycle events.
@@ -299,8 +281,6 @@ Duration: 16 s
 
 This allows the system administrator to track unexpected downtime and subsequent recovery remotely.
 
----
-
 ## Database
 
 SQLite is used for persistent storage.
@@ -314,15 +294,11 @@ The database maintains:
 
 Raw measurement records are periodically cleaned up according to the configured retention period, while hourly summaries provide longer-term historical analytics.
 
----
-
 ## References
 
 - [CozyLife Local](https://github.com/soulripper13/cozylife_local)
 - [FastAPI Documentation](https://fastapi.tiangolo.com/)
 - [discord.py Documentation](https://discordpy.readthedocs.io/)
-
----
 
 ## License
 
