@@ -7,7 +7,7 @@ from fastapi import FastAPI
 
 # Set to 10 if the CozyLife app shows a value 10x smaller than the dashboard.
 POWER_DIVISOR = float(os.getenv("PLUG_POWER_DIVISOR", "1"))
-LIVE_INTERVAL_S = float(os.getenv("PLUG_LIVE_INTERVAL", "2"))    # How often the plug is read
+LIVE_INTERVAL_S = float(os.getenv("SMART_PLUG_COLLECTION_TIME", "5"))    # How often the plug is read
 SAVE_INTERVAL_S = int(os.getenv("PLUG_SAVE_INTERVAL", "10"))     # How often an average is stored
 
 class ElectronicSamplerService:
@@ -94,12 +94,7 @@ class ElectronicSamplerService:
             except sqlite3.Error:
                 self.log.exception("Database error in sampler")
 
-            stop.wait(
-                max(
-                    0.0,
-                    self.LIVE_INTERVAL_S - (time.time() - started)
-                )
-            )
+            stop.wait(max(0.0, self.LIVE_INTERVAL_S - (time.time() - started)))
 
     @asynccontextmanager
     async def lifespan(self, app: FastAPI):
