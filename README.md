@@ -190,7 +190,13 @@ Make sure the Smart Plug IP address is correct and accessible from the monitorin
 
 The Discord Bot must have permission to view the target channel and send messages.
 
-### 4. Run the application
+### 4. Initialize Database
+
+```bash
+python migrations/init_migration.py
+```
+
+### 5. Run the application
 
 ```bash
 python app.py
@@ -200,12 +206,6 @@ The dashboard will be available at:
 
 ```text
 http://localhost:8000/dashboard
-```
-
-API documentation:
-
-```text
-http://localhost:8000/docs
 ```
 
 ---
