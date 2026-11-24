@@ -6,6 +6,8 @@ A lightweight monitoring platform built with Python and FastAPI to track electri
 
 The system collects real-time power readings, maintains historical consumption records, provides a web-based dashboard, and detects system shutdown and restart events with Discord notifications.
 
+![Demo](./static/images/demo.png)
+
 ## Features
 
 ### 1. Smart Plug Monitoring
