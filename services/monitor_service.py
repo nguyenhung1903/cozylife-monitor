@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from typing import Literal
 from contextlib import closing
 from fastapi import Query
-from services.electronic_sampler import SAVE_INTERVAL_S
+from configs import envParams
 
 class MonitorService():
     def __init__(self, dbConn):
@@ -75,7 +75,7 @@ class MonitorService():
         return {
             "range": range_,
             "kind": cfg["kind"],  # "line" plots average watts, "bar" plots kWh per bucket
-            "save_interval_s": SAVE_INTERVAL_S,
+            "save_interval_s": envParams.SAMPLER.SAVE_INTERVAL_S,
             "points": points,
             "stats": {
                 "avg": round(total_ws / total_s, 2) if total_s else None,

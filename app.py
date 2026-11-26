@@ -11,28 +11,22 @@ from services.electronic_sampler import ElectronicSamplerService
 from services.monitor_service import MonitorService
 from services.lifecycle_service import LifecycleService
 from services.discordbot_service import DiscordBotService
-from dotenv import load_dotenv
-load_dotenv()
+from configs import envParams, verParams
 
 log = logging.getLogger("smart_plug")
 
-PLUG_IP = os.getenv("SMART_PLUG_IP", "192.168.1.100")
-PLUG_PORT = int(os.getenv("SMART_PLUG_PORT", "5555"))
-STALE_AFTER_S = 10                                               # Live reading older than this is "offline"
-DB_PATH = os.getenv("PLUG_DB", "plug.db")
-STATIC_DIR = Path(__file__).parent / "static"
-plug = SmartPlug(PLUG_IP, port=PLUG_PORT)
-dbConn = DatabaseConnection(DB_PATH)
-discordBot = discordBot = DiscordBotService(token=os.getenv("DISCORD_BOT_TOKEN"),channel_id=int(os.getenv("DISCORD_BOT_CHANNEL_ID")),logger=log)
+plug = SmartPlug(ip = envParams.SMART_PLUG_DEVICE.IP, port=envParams.SMART_PLUG_DEVICE.PORT)
+dbConn = DatabaseConnection(db_path= envParams.DATABASE.DB_PATH)
+discordBot = DiscordBotService(token=envParams.DISCORD.BOT.TOKEN,channel_id=envParams.DISCORD.BOT.CHANNEL_ID,logger=log)
 elecSampler = ElectronicSamplerService(dbConn=dbConn, plug = plug, log=log)
 monitorService = MonitorService(dbConn = dbConn)
 lifecycleService = LifecycleService(dbConn=dbConn, discordBot=discordBot)
 
 # --------------------------------------------------------------------- API
 app = FastAPI(
-    title="Smart Plug API",
-    description="Local API for CozyLife Smart Plug monitoring",
-    version="3.0.0",
+    title=verParams.TITLE,
+    description=verParams.DESCRIPTION,
+    version=verParams.VERSION,
     lifespan=elecSampler.lifespan,
 )
 
@@ -43,7 +37,7 @@ def root():
 @app.get("/dashboard", include_in_schema=False)
 def dashboard():
     """Serve the dashboard page."""
-    return FileResponse(STATIC_DIR / "index.html")
+    return FileResponse(os.path.join(envParams.APP.STATIC_DIR, "index.html"))
 
 @app.get("/api/smart-plug")
 def get_plug():
@@ -52,7 +46,7 @@ def get_plug():
         raise HTTPException(status_code=503, detail="No reading yet")
     if "error" in latest:
         raise HTTPException(status_code=503, detail=f"Plug unreachable: {latest['error']}")
-    if time.time() - latest["timestamp"] > STALE_AFTER_S:
+    if time.time() - latest["timestamp"] > envParams.SAMPLER.STALE_AFTER_S:
         raise HTTPException(status_code=503, detail="Reading is stale")
     return latest
 
@@ -76,7 +70,7 @@ if __name__ == "__main__":
     lifecycleService.start()
     
     uvicorn.run("app:app",
-        host=os.getenv("APP_HOST"),
-        port=int(os.getenv("APP_PORT")),
+        host=envParams.APP.HOST,
+        port=envParams.APP.PORT,
         reload=True
     )

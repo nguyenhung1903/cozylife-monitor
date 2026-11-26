@@ -4,11 +4,7 @@ import time
 import threading
 from contextlib import asynccontextmanager, closing
 from fastapi import FastAPI
-
-# Set to 10 if the CozyLife app shows a value 10x smaller than the dashboard.
-POWER_DIVISOR = float(os.getenv("PLUG_POWER_DIVISOR", "1"))
-LIVE_INTERVAL_S = float(os.getenv("SMART_PLUG_COLLECTION_TIME", "5"))    # How often the plug is read
-SAVE_INTERVAL_S = int(os.getenv("PLUG_SAVE_INTERVAL", "10"))     # How often an average is stored
+from configs import envParams
 
 class ElectronicSamplerService:
 
@@ -20,14 +16,10 @@ class ElectronicSamplerService:
     ):
         self.dbConn = dbConn
         self.plug = plug
-        self.SAVE_INTERVAL_S = SAVE_INTERVAL_S
-        self.POWER_DIVISOR = POWER_DIVISOR
-        self.LIVE_INTERVAL_S = LIVE_INTERVAL_S
         self.log = log
-
+        
         self._lock = threading.Lock()
         self._latest = None
-
         self._stop = None
         self._thread = None
 
@@ -39,7 +31,7 @@ class ElectronicSamplerService:
     def _sampler(self, stop: threading.Event):
         window = []
         last_on = None
-        next_save = time.time() + self.SAVE_INTERVAL_S
+        next_save = time.time() + envParams.SAMPLER.SAVE_INTERVAL_S
         next_purge = 0.0
 
         while not stop.is_set():
@@ -50,7 +42,7 @@ class ElectronicSamplerService:
 
                 power = (
                     None if reading.power_w is None
-                    else reading.power_w / self.POWER_DIVISOR
+                    else reading.power_w / envParams.SAMPLER.POWER_DIVISOR
                 )
 
                 with self._lock:
@@ -81,11 +73,11 @@ class ElectronicSamplerService:
                             int(now),
                             sum(window) / len(window),
                             last_on,
-                            self.SAVE_INTERVAL_S
+                            envParams.SAMPLER.SAVE_INTERVAL_S
                         )
 
                     window = []
-                    next_save = now + self.SAVE_INTERVAL_S
+                    next_save = now + envParams.SAMPLER.SAVE_INTERVAL_S
 
                 if now >= next_purge:
                     self.dbConn.purge_old()
@@ -94,7 +86,7 @@ class ElectronicSamplerService:
             except sqlite3.Error:
                 self.log.exception("Database error in sampler")
 
-            stop.wait(max(0.0, self.LIVE_INTERVAL_S - (time.time() - started)))
+            stop.wait(max(0.0, envParams.SAMPLER.LIVE_INTERVAL_S - (time.time() - started)))
 
     @asynccontextmanager
     async def lifespan(self, app: FastAPI):
