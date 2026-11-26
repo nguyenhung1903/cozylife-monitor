@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from typing import Literal
 from contextlib import closing
 from fastapi import Query
-from configs import envParams
+from configs import envParams, schemaParams
 
 class MonitorService():
     def __init__(self, dbConn):
@@ -34,7 +34,7 @@ class MonitorService():
 
     def get_history(self, range_: Literal["hour", "day", "week", "month", "year"] = Query("hour", alias="range")):
         """Bucketed power history: last hour, 24 hours, 7 days, 30 days or 12 months."""
-        cfg = self.dbConn.RANGES[range_]
+        cfg = schemaParams["RANGES"][range_]
         if cfg["unit"] == "fixed":
             buckets = self._fixed_buckets(cfg["span"], cfg["bucket"])
             key_sql, key_params = "(ts - ?) / ?", (buckets[0][0], cfg["bucket"])
@@ -45,7 +45,7 @@ class MonitorService():
         start, end = buckets[0][0], buckets[-1][1]
 
         table = cfg["table"]
-        energy, seconds, peak = self.dbConn._COLUMNS[table]
+        energy, seconds, peak = schemaParams["COLUMNS"][table]
         # table and column names come from the constants above, never from the request
         sql = f"""
             SELECT {key_sql}, SUM({energy}), SUM({seconds}), MAX({peak})

@@ -25,7 +25,9 @@ envParams = {
     },
     
     "DATABASE": {
-        "DB_PATH": os.getenv("PLUG_DB", "plug.db")
+        "DB_PATH": os.getenv("PLUG_DB", "plug.db"),
+        "RAW_RETENTION_DAYS": int(os.getenv("PLUG_RAW_RETENTION_DAYS", "3")),
+        "RETENTION_DAYS": int(os.getenv("PLUG_RETENTION_DAYS", str(3 * 365)))  # Hourly summaries are small (about 8,800 rows per year) and are kept for 3 years.
     },
     
     "DISCORD":{
